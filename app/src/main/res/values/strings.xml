@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TransQA</string>
+    <string name="toggle_servicio_iniciar">Iniciar</string>
+    <string name="toggle_servicio_terminar">Terminar</string>
+</resources>
