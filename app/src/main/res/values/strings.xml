@@ -1,5 +1,28 @@
 <resources>
     <string name="app_name">TransQA</string>
+
     <string name="toggle_servicio_iniciar">Iniciar</string>
     <string name="toggle_servicio_terminar">Terminar</string>
+    <string name="toggle_servicio_reiniciar">Reiniciar</string>
+
+    <string name="anuncio_binevenido">Bienvenido.</string>
+    <string name="anuncio_servicio_reiniciado">Servicio reiniciado.</string>
+    <string name="anuncio_servicio_iniciado">Servicio iniciado.</string>
+    <string name="anuncio_servicio_terminado">Servicio terminado.</string>
+    <string name="anuncio_sesion_iniciando">Iniciando sesión.</string>
+    <string name="anuncio_sesion_iniciada">Sesión iniciada.</string>
+    <string name="anuncio_sesion_terminando">Terminando sesión.</string>
+    <string name="anuncio_sesion_terminada">Sesión terminada.</string>
+    <string name="anuncio_gps_iniciado">GPS iniciado.</string>
+    <string name="anuncio_gps_terminado">GPS pausado.</string>
+
+    <string name="error_geolocalizacion_interno">Error interno en servicio de geolocalización.</string>
+    <string name="error_geolocalizacion_no_servicio">Servicio de geolocalización no disponible.</string>
+    <string name="error_geolocalizacion_no_gps">El servicio de geolocalización requiere modo de alta precisión (GPS).</string>
+    <string name="error_geolocalizacion_no_permisos">El servicio de geolocalización no cuenta con suficientes permisos para su funcionamiento.</string>
+    <string name="error_sqlite_abrir_db">Error abriendo base de datos de geolocalización.</string>
+    <string name="error_creando_sesion">Error creando sesión.</string>
+    <string name="error_creando_sesion_plantilla">Error creando sesión #%d.</string>
+    <string name="error_terminando_sesion">Error terminando sesión.</string>
+    <string name="error_terminando_sesion_plantilla">Error terminando sesión #%d.</string>
 </resources>

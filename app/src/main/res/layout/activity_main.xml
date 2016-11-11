@@ -13,9 +13,19 @@
     <Button
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_centerVertical="true"
-        android:layout_centerHorizontal="true"
         android:id="@+id/toggleServicio"
         android:text="@string/toggle_servicio_iniciar"
-        android:enabled="false" />
+        android:enabled="false"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true" />
+
+    <TextView
+        android:id="@+id/mensajesServicio"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentStart="true"
+        android:layout_above="@+id/toggleServicio"
+        android:layout_alignParentEnd="true"
+        android:gravity="bottom" />
 </RelativeLayout>

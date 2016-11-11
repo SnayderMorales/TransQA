@@ -44,6 +44,4 @@ final public class GeolocalizacionSQLite {
 
         return resultado;
     };
-
-    private GeolocalizacionSQLite() { throw new RuntimeException(); }
 }

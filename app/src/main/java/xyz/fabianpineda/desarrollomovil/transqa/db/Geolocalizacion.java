@@ -7,6 +7,4 @@ final class Geolocalizacion {
     static final String TABLA_GEOLOCALIZACION_LATITUD = "latitud";
     static final String TABLA_GEOLOCALIZACION_LONGITUD = "longitud";
     static final String TABLA_GEOLOCALIZACION_FECHA = "fecha";
-
-    private Geolocalizacion() { throw new RuntimeException(); }
 }

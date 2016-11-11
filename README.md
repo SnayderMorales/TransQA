@@ -5,4 +5,6 @@ Captura la ubicación actual del usuario de la aplicación repetidamente en inte
 
 La captura de ubicaciones inicia al presionar un botón en la aplicación y es detenida al volver a presionar el miusmo botón.
 
-*TO-DO: iniciar captura de coordenadas y almacenarlos en base de datos (que ya funciona). Terminar UI y asociarla a un servicio.*
+Mientras la aplicación está "cerrada", la captura de coordenadas continuará hasta que el usuario presione el boton "terminar."
+
+* TO-DO: manejar permisos en Android 6 y más reciente, documentar, limpiar, hacer mas presentable.

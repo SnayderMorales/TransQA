@@ -3,8 +3,6 @@ package xyz.fabianpineda.desarrollomovil.transqa.db;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
-import xyz.fabianpineda.desarrollomovil.transqa.tiempo.Tiempo;
-
 public final class SesionSQLite {
     static final String SQL_CREAR_TABLA_SESION = String.format(
         "CREATE TABLE %s (" +
@@ -94,6 +92,4 @@ public final class SesionSQLite {
         sesion.close();
         return resultado;
     }
-
-    private SesionSQLite() { throw new RuntimeException(); }
 }
