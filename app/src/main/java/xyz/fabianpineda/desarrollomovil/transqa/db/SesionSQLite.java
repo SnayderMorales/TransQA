@@ -3,43 +3,77 @@ package xyz.fabianpineda.desarrollomovil.transqa.db;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
+/**
+ * Información de tabla Sesion en SQLite.
+ *
+ * Usado para crear y operar con la tabla "Sesion" en SQLite3 en la base de datos "DB".
+ *
+ * TODO: mover statements SQL dentro de métodos y hacerlos constantes, propiedades de clase.
+ */
 public final class SesionSQLite {
+    /**
+     * Definición de estructura de tabla Sesion. Esquema.
+     */
     static final String SQL_CREAR_TABLA_SESION = String.format(
         "CREATE TABLE %s (" +
             "%s INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE," +
-            "%s DATETIME DEFAULT (datetime('now','localtime'))," +
+            "%s VARCHAR(255) NOT NULL DEFAULT ''," +
+            "%s DATETIME NOT NULL DEFAULT (datetime('now', 'localtime'))," +
             "%s DATETIME" +
         ");",
 
         Sesion.TABLA_SESION,
 
         Sesion.TABLA_SESION_ID,
+        Sesion.TABLA_SESION_NOMBRE,
         Sesion.TABLA_SESION_FECHA_INICIO,
         Sesion.TABLA_SESION_FECHA_FIN
     );
 
+    /**
+     * SQL para destruir la tabla Sesion.
+     */
     static final String SQL_DESTRUIR_TABLA_SESION = String.format(
         "DROP TABLE IF EXISTS %s;",
         Sesion.TABLA_SESION
     );
 
-    public static final long iniciarSesion(SQLiteDatabase db) {
-        long resultado = -1;
+    /**
+     * Inicia una nueva Sesion; crea un nuevo registro Sesion y regresa sus datos.
+     *
+     * @param db Conexion abierta a una SQLiteDatabase con la base de datos "DB", con permisos de lectura y escritura
+     *
+     * @return Un objeto Cursor con los resultados (información) de la nueva Sesion creada, o null si no se pudo crear. Debe ser cerrado posteriormente llamado su método close()
+     */
+    public static final Cursor iniciarSesion(SQLiteDatabase db) {
+        Cursor temp;
+        long id = 0;
 
-        db.beginTransaction();
-        try {
-            // https://developer.android.com/reference/android/database/sqlite/SQLiteDatabase.html#insert(java.lang.String,%20java.lang.String,%20android.content.ContentValues)
-            resultado = db.insert(Sesion.TABLA_SESION, Sesion.TABLA_SESION_FECHA_FIN, null);
+        /*
+         * https://developer.android.com/reference/android/database/sqlite/SQLiteDatabase.html#insert(java.lang.String,%20java.lang.String,%20android.content.ContentValues)
+         * Usando Sesion.TABLA_SESION_FECHA_FIN como valor para nullColumnHack ya que es una propiedad nulificable.
+         */
+        id = db.insert(Sesion.TABLA_SESION, Sesion.TABLA_SESION_FECHA_FIN, null);
 
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
+        // Regresa el Cursor si y solo si contiene un resultado después de inserción.
+        if (id > 0 && (temp = seleccionarSesion(db, id)) != null && temp.moveToFirst()) {
+            return temp;
         }
 
-        return resultado;
+        // Registro no existe. Regresando null.
+        return null;
     }
 
+    /**
+     * Selecciona una Sesion por ID y regresa sus datos.
+     *
+     * @param db Conexion abierta a una SQLiteDatabase con la base de datos "DB", con permisos de lectura y escritura
+     * @param id ID de la sesión siendo buscada.
+     *
+     * @return Un Cursor con los resultados de la consulta; con el registro cuya ID de sesión es "id". Regresa null si no existe la Sesion. El Cursor debe ser cerrado posteriormente usando su método close()
+     */
     public static final Cursor seleccionarSesion(SQLiteDatabase db, long id) {
+        Cursor temp;
         String consulta = String.format(
             "SELECT * FROM %s WHERE %s = %s LIMIT 1",
             Sesion.TABLA_SESION,
@@ -47,49 +81,55 @@ public final class SesionSQLite {
             String.valueOf(id)
         );
 
-        return db.rawQuery(consulta, null);
+        // Sólo se regresa el Cursor si existe un registro Sesion con ID "id"
+        if ((temp = db.rawQuery(consulta, null)) != null && temp.moveToFirst()) {
+            return temp;
+        }
+
+        // Registro no existe. Regresando null.
+        return null;
     }
 
-    public static final boolean terminarSesion(SQLiteDatabase db, long id) {
+    /**
+     * Termina una sesión abierta, agregando una fecha de terminación.
+     *
+     * @param db Conexion abierta a una SQLiteDatabase con la base de datos "DB", con permisos de lectura y escritura
+     * @param id ID de la sesión abierta que se desea cerrar.
+     *
+     * @return Un Cursor con la información de la sesión cerrada. Regresa null si la sesión no existe o si ya estaba terminada. En este último caso, la fecha de terminación de sesión quedará intacta.
+     */
+    public static final Cursor terminarSesion(SQLiteDatabase db, long id) {
+        Cursor sesion;
+
         String update = String.format(
-            "UPDATE %s SET %s = (datetime('now','localtime')) WHERE %s = %s",
+            "UPDATE %s SET %s = (datetime('now','localtime')) WHERE %s = %d",
             Sesion.TABLA_SESION,
             Sesion.TABLA_SESION_FECHA_FIN,
             Sesion.TABLA_SESION_ID,
-            String.valueOf(id)
+            id
         );
 
-        Cursor sesion = seleccionarSesion(db, id);
-        boolean resultado = false;
+        // Es un error si la sesión no existe o si "id" es un ID inválido.
+        if (id < 1 || (sesion = seleccionarSesion(db, id)) == null || !sesion.moveToFirst()) {
+            return null;
+        }
 
-        int id_sesion = -1;
-        //String fecha_inicio = null;
-        String fecha_fin = null;
-
-        if (sesion == null) {
-            return resultado;
-        } else if (!sesion.moveToFirst()) {
+        // Si la sesión existe y no tiene fecha de terminación, entonces la sesión está abierta y puede ser terminada.
+        if (sesion.getString(Sesion.TABLA_SESION_FECHA_FIN_INDICE) == null) {
             sesion.close();
-            return resultado;
-        }
 
-        fecha_fin = sesion.getString(2);
+            db.execSQL(update);
 
-        if (fecha_fin == null || fecha_fin.equals("") || fecha_fin.equals("NULL")) {
-            db.beginTransaction();
-
-            try {
-                db.execSQL(update);
-                db.setTransactionSuccessful();
-                resultado = true;
-            } finally {
-                db.endTransaction();
+            // Esto nunca debería ocurrir. Pero si ocurre (fila actualizada deja de existir por alguna razón) se regresa null. Es un error.
+            if ((sesion = seleccionarSesion(db, id)) == null || !sesion.moveToFirst() || sesion.getString(Sesion.TABLA_SESION_FECHA_FIN_INDICE) == null) {
+                return null;
             }
-        } else {
-            resultado = false;
+
+            // La sesión existe, estaba abierta y fue cerrada exitosamente. Se regresa su Cursor.
+            return sesion;
         }
 
-        sesion.close();
-        return resultado;
+        // La sesión existe pero ya estaba cerrada. Quedará intacta y se regresará null. Es un error.
+        return null;
     }
 }
