@@ -1,5 +1,6 @@
 package xyz.fabianpineda.desarrollomovil.transqa.db;
 
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
@@ -42,18 +43,24 @@ public final class SesionSQLite {
      * Inicia una nueva Sesion; crea un nuevo registro Sesion y regresa sus datos.
      *
      * @param db Conexion abierta a una SQLiteDatabase con la base de datos "DB", con permisos de lectura y escritura
+     * @param nombre Nombre o comentario de sesión. Puede ser null. Null será tratado como una String vacía.
      *
      * @return Un objeto Cursor con los resultados (información) de la nueva Sesion creada, o null si no se pudo crear. Debe ser cerrado posteriormente llamado su método close()
      */
-    public static final Cursor iniciarSesion(SQLiteDatabase db) {
+    public static final Cursor iniciarSesion(SQLiteDatabase db, String nombre) {
         Cursor temp;
         long id = 0;
 
-        /*
-         * https://developer.android.com/reference/android/database/sqlite/SQLiteDatabase.html#insert(java.lang.String,%20java.lang.String,%20android.content.ContentValues)
-         * Usando Sesion.TABLA_SESION_FECHA_FIN como valor para nullColumnHack ya que es una propiedad nulificable.
-         */
-        id = db.insert(Sesion.TABLA_SESION, Sesion.TABLA_SESION_FECHA_FIN, null);
+        String n = "";
+
+        if (nombre != null) {
+            n = nombre.trim();
+        }
+
+        ContentValues valoresNuevaSesion = new ContentValues();
+        valoresNuevaSesion.put(Sesion.TABLA_SESION_NOMBRE, n);
+
+        id = db.insert(Sesion.TABLA_SESION, null, valoresNuevaSesion);
 
         // Regresa el Cursor si y solo si contiene un resultado después de inserción.
         if (id > 0 && (temp = seleccionarSesion(db, id)) != null && temp.moveToFirst()) {

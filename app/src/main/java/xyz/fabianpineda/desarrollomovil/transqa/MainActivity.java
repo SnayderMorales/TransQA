@@ -1,12 +1,16 @@
 package xyz.fabianpineda.desarrollomovil.transqa;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
+import android.support.annotation.NonNull;
 import android.support.v4.content.LocalBroadcastManager;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
@@ -18,7 +22,14 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
+import permissions.dispatcher.NeedsPermission;
+import permissions.dispatcher.OnNeverAskAgain;
+import permissions.dispatcher.OnPermissionDenied;
+import permissions.dispatcher.OnShowRationale;
+import permissions.dispatcher.PermissionRequest;
+import permissions.dispatcher.RuntimePermissions;
 import xyz.fabianpineda.desarrollomovil.transqa.geolocalizacion.ServicioGeolocalizacion;
+import xyz.fabianpineda.desarrollomovil.transqa.widgets.DialogoEditText;
 
 /**
  * Define la interfáz de usuario de la aplicación. Recibe y muestra respuestas de
@@ -31,9 +42,9 @@ import xyz.fabianpineda.desarrollomovil.transqa.geolocalizacion.ServicioGeolocal
  * que desea "manejar" y ejecuta una función distinta para cada tipo de acción.
  *
  * Si a futuro se desea manejar más acciones del servicio, entonces se deben modificar las
- * propiedades "filtroAccionesServicio" y ReceptorServicioGeolocalizacion.onReceive.
+ * propiedades "filtroAccionesServicio" y intentServicioGeolocalizacionRecibido.
  */
-//@RuntimePermissions
+@RuntimePermissions
 public class MainActivity extends AppCompatActivity {
     /**
      * Filtro de intents "mensaje" aceptados por esta Activity.
@@ -43,9 +54,11 @@ public class MainActivity extends AppCompatActivity {
      * Activity deje de responder a la acción especificada por la entrada.
      *
      * Por cada entrada agregada en este filtro, debe haber una código para manejar este tipo de
-     * acción definida en ReceptorServicioGeolocalizacion.onReceive.
+     * acción definida en intentServicioGeolocalizacionRecibido.
+     *
+     * TODO: mover este "intent filter" al AndroidManifest.xml?
      */
-    private static IntentFilter filtroAccionesServicio;
+    private static final IntentFilter filtroAccionesServicio;
     static {
         filtroAccionesServicio = new IntentFilter();
 
@@ -58,7 +71,8 @@ public class MainActivity extends AppCompatActivity {
         filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION);
         filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_GPS_INICIADO);
         filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_GPS_TERMINADO);
-        filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_GPS_DESACTIVADO); // Terminar esto. Asegurarse de que funciona. Manejar permisos.
+        filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_GPS_DESACTIVADO);
+        filtroAccionesServicio.addAction(ServicioGeolocalizacion.SERVICIO_ACCION_DISPOSITIVO_APAGADO);
     }
 
     /** Formato para horas y/o fechas mostradas antes de cada mensaje en mensajesServicio */
@@ -75,6 +89,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int BOTON_ACCION_DESCONOCIDA = 0;      // "Valor por defecto." Es un error.
     private static final int BOTON_ACCION_SESION_INICIAR = 1;   // Inicia el servicio y/o una sesión.
     private static final int BOTON_ACCION_SESION_TERMINAR = 2;  // Termina el servicio y/o una sesión.
+
+    // Etiqueta que podría ser usada para identificar DialogoEditText usando un FragmentManager.
+    private static final String DIALOGO_NOMBRE_SESION_TAG = "MAIN_ACTIVITY_DIALOGOEDITTEXT_SESION";
 
     /*
      * Constantes que definen los posibles "textos" del botón en todos sus posibles estados/acciones.
@@ -100,7 +117,7 @@ public class MainActivity extends AppCompatActivity {
      *
      * Por cada *tipo* de mensaje enviado desde ServicioGeolocalizacion a esta Activity, debe haber
      * una entrada correspondiente a la acción (mensaje) en filtroAccionesServicio y en
-     * ReceptorServicioGeolocalizacion.onReceive
+     * intentServicioGeolocalizacionRecibido
      */
     private LocalBroadcastManager receptor;
 
@@ -115,6 +132,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView infoFechaInicioSesion; // Muestra fecha inicio sesión actual o anterior terminada
     private TextView infoFechaFinSesion;    // Muestra fecha fin de última sesión, si existe.
     private TextView mensajesServicio;      // Muestra información detallada al usuario, con fecha.
+
+    private DialogoEditText dialogoNombreSesion;    // Solicita nombre de sesión. Diálogo cancelable.
 
     private Button botonToggleServicio;     // Botón toggle "inteligente." Inicia/termina seesion/servicio
 
@@ -153,6 +172,146 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Muestra un diálogo de entrada de texto con un solo campo de texto, un botón aceptar, y
+     * un botón cancelar, en donde al usuario se le solicitará un nombre para una nueva sesión,
+     * el cual puede ser un texto vacío que será tratado como una "sesión sin nombre."
+     *
+     * Si la captura de texto no es cancelada, se procede a iniciar una nueva sesión.
+     *
+     * La función también toma decisiones basándose en la información obtenida del usuario observando
+     * su interacción con el diálogo y es capáz de iniciar una nueva sesión si no se cancela diálogo
+     *
+     * Este método asume que el botón "iniciar" está desactivado antes de ser llamado. Si al
+     * terminar de mostrar el diálogo (cualquier resultado) acción sigue siendo
+     * BOTON_ACCION_SESION_INICIAR y el botón sigue estando desactivado: si el diálogo fue
+     * cancelado, el botón es reactivado. Si no fue cancelado y se ingresó un nombre para la
+     * sesión, entonces se inicia una nueva sesión y el botón permanecerá desactivado hasta que
+     * el servicio envíe una respuesta.
+     *
+     * No se hace nada si ya existía un diálogo abierto.
+     *
+     * TODO: mover código de inicio de sesión a un método separado?
+     */
+    @NeedsPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+    protected void solicitarNombreSesion() {
+        if (dialogoNombreSesion != null) {
+            return;
+        }
+        // Auto-referencia usada como "contexto" para "listeners"; en ellos "this" es distinto.
+        final MainActivity self = this;
+
+        // Referencia final para nuevo diálogo.
+        dialogoNombreSesion = new DialogoEditText();
+        final DialogoEditText dialogo = dialogoNombreSesion;
+
+        dialogo.mostrar(
+            this,
+            DIALOGO_NOMBRE_SESION_TAG,
+
+            R.string.dialogo_nombre_sesion_titulo,
+            R.string.dialogo_nombre_sesion_mensaje,
+            R.string.dialogo_nombre_sesion_hint,
+
+            new DialogoEditText.ListenerDialogoEditTextOK() {
+                @Override
+                public void dialogoEditTextOK(String texto) {
+                    dialogoNombreSesion = null;
+
+                    if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
+                        notificarUsuario(R.string.anuncio_sesion_iniciando);
+
+                        Intent intentIniciarSesion = new Intent(ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION, null, self, ServicioGeolocalizacion.class);
+                        intentIniciarSesion.putExtra(ServicioGeolocalizacion.SERVICIO_PARAMETRO_ACCION, texto);
+                        self.startService(intentIniciarSesion);
+                    }
+                }
+            },
+
+            new DialogoEditText.ListenerDialogoEditTextCancelar() {
+                @Override
+                public void dialogoEditTextCancelar(String texto) {
+                    dialogoNombreSesion = null;
+
+                    if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
+                        botonToggleServicio.setEnabled(true);
+                    }
+                }
+            },
+
+            new DialogoEditText.ListenerDialogoEditTextCancelado() {
+                @Override
+                public void dialogoEditTextCancelado(String texto) {
+                    dialogoNombreSesion = null;
+
+                    if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
+                        botonToggleServicio.setEnabled(true);
+                    }
+                }
+            }
+        );
+    }
+
+    @OnShowRationale(Manifest.permission.ACCESS_FINE_LOCATION)
+    void dialogoComprobarPermisosGPS(final PermissionRequest solicitud) {
+        // Botón "conceder permisos"
+        new AlertDialog.Builder(this).setPositiveButton(R.string.dialogo_permisos_gps_ok, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(@NonNull DialogInterface dialog, int which) {
+                solicitud.proceed();
+            }
+
+        // Botón "denegar permisos"
+        }).setNegativeButton(R.string.dialogo_permisos_gps_cancelar, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(@NonNull DialogInterface dialog, int which) {
+                solicitud.cancel();
+            }
+        }).setCancelable(false).setMessage(R.string.dialogo_permisos_gps_razon).show();
+    }
+
+    /**
+     * Ejecutado automáticamente cuando el usuario ha denegado temporalmente los permisos de GPS
+     * de la aplicación. El usuario puede reintentar y tendrá una segunda oportunidad de conceder
+     * los permisos necesarios.
+     */
+    @OnPermissionDenied(Manifest.permission.ACCESS_FINE_LOCATION)
+    void permisosGPSDenegados() {
+        notificarUsuario(R.string.error_permisos_gps_denegados);
+
+        if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
+            botonToggleServicio.setEnabled(true);
+        }
+    }
+
+    /**
+     * Ejecutado automáticamente cuando se detecta que los permisos de GPS son insuficientes y han
+     * sido desactivados permanentemente por el usuario. Si el usuario desea continuar usando la
+     * aplicación, debe manualmente activar los permisos en settings.
+     */
+    @OnNeverAskAgain(Manifest.permission.ACCESS_FINE_LOCATION)
+    void permisosGPSDenegadosPermanentemente() {
+        notificarUsuario(R.string.error_permisos_gps_denegados_permanentemente);
+
+        if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
+            botonToggleServicio.setEnabled(true);
+        }
+    }
+
+    /**
+     * Delega parte de la responsabilidad de manejo de persmisos a PermissionDispatcher.
+     * https://github.com/hotchemi/PermissionsDispatcher#2-delegate-to-generated-class
+     *
+     * @param requestCode Código único de solicitud de comprobación de permiso.
+     * @param permissions Arreglo de permisos solicitados.
+     * @param grantResults Arreglo de resultado de permisos concedidos.
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        MainActivityPermissionsDispatcher.onRequestPermissionsResult(this, requestCode, grantResults);
+    }
+
+    /**
      * Imprime una nueva "linea" en el TextView "mensajesServicio" de la Activity.
      *
      * Todos los mensajes sigue el formato especificado en "formatoMensajesNotificacion" que
@@ -173,14 +332,20 @@ public class MainActivity extends AppCompatActivity {
      * La función ejecutada por el botón debe ser igual al valor de "accion". Esta variable puede
      * tener como valor el valor de cualquier constante BOTON_ACCION_*. El método debe estar listo
      * para manejar cada "caso / accion soportada."
+     *
+     * Si la acción a realizar es iniciar una nueva sesión, entonces se pide al usuario un nombre
+     * o descripción para la sesión.
+     *
+     * Sólo es necesario comprobar si hay suficientes permisos en Android 6.0 o más reciente cuando
+     * se busca iniciar una nueva sesión, ya que si lso permisos cambian durante una sesión, el
+     * servicio se asegura de terminar la sesión inmediatamente.
      */
     private void botonToggleServicioPresionado() {
         botonToggleServicio.setEnabled(false);
 
         switch(accion) {
             case BOTON_ACCION_SESION_INICIAR:
-                notificarUsuario(R.string.anuncio_sesion_iniciando);
-                startService(new Intent(ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION, null, this, ServicioGeolocalizacion.class));
+                MainActivityPermissionsDispatcher.solicitarNombreSesionWithCheck(this);
                 break;
             case BOTON_ACCION_SESION_TERMINAR:
                 notificarUsuario(R.string.anuncio_sesion_terminando);
@@ -212,10 +377,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una acción que está en "filtroAccionesServicio", pero que no está siendo
-     * manejada en ReceptorServicioGeolocalizacion.onReceive. Ocurre también si se especificó
+     * manejada en intentServicioGeolocalizacionRecibido. Ocurre también si se especificó
      * explícitamente la acción SERVICIO_ACCION_DESCONOCIDA.
      *
      * Se recomienda ignorar este tipo de mensajes y se recomienda no hacer una solicitud de este
@@ -235,7 +400,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_NINGUNA de ServicioGeolocalizacion.
      *
@@ -256,7 +421,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_SERVICIO_REINICIADO de ServicioGeolocalizacion.
      *
@@ -274,7 +439,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_INICIAR_SERVICIO de ServicioGeolocalizacion.
      *
@@ -300,7 +465,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_TERMINAR_SERVICIO de ServicioGeolocalizacion.
      *
@@ -340,7 +505,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_INICIAR_SESION de ServicioGeolocalizacion.
      *
@@ -391,7 +556,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_TERMINAR_SESION de ServicioGeolocalizacion.
      *
@@ -442,7 +607,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_GPS_INICIADO de ServicioGeolocalizacion.
      *
@@ -463,7 +628,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_GPS_TERMINADO de ServicioGeolocalizacion.
      *
@@ -486,7 +651,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Posible respuesta a ReceptorServicioGeolocalizacion.onReceive.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
      * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_GPS_DESACTIVADO de ServicioGeolocalizacion.
      *
@@ -511,87 +676,97 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Define un receptor privado de mensajes de ServicioGeolocalizacion.
+     * Posible respuesta en intentServicioGeolocalizacionRecibido.
      *
-     * Su método onReceive toma distintas acciones dependiendo del mensaje recibido a manera de Intent.
+     * Ocurre si se recibe una respuesta de tipo SERVICIO_ACCION_DISPOSITIVO_APAGADO de ServicioGeolocalizacion.
+     *
+     * Nunca hace sentido hacer solicitudes de este tipo, pero es posible manejar respuestas de este
+     * tipo para, por ejemplo, persistir el estado de la UI o simplemente mostrar mensajes de
+     * depuración.
+     *
+     * @param tipoRespuesta Código de respuesta. Fue exitosa la operación o no? Ver: ServicioGeolocalizacion.SERVICIO_RESPUESTA_*
+     * @param datos Datos adicionales recibidos con la respuesta.
      */
-    private final class ReceptorServicioGeolocalizacion extends BroadcastReceiver {
-        /**
-         * Extrae información del mensaje (intent) recibido de ServicioGeolocalizacion y toma
-         * decisiones basándose en su contenido. En especial, basñandose en su "acción."
-         *
-         * La "accion" debe coincidir con alguno de los valores de
-         * ServicioGeolocalizacion.SERVICIO_ACCION_* para que este método haga algo. Si accion
-         * coincide, entonces el flujo de ejecución es despachado por este método a un método
-         * accion*() de esta Activity que corresponda a la acción; el código de esta función
-         * accion*() debe manejar adecuadamente la respuesta recibida.
-         *
-         * Tenga en cuenta que a este receptor sólo llegarán mensajes que están definidos en la
-         * propiedad "filtroAccionesServicio."
-         *
-         * @param context Contexto Android. Típicamente MainActivity en este caso.
-         * @param intent Datos recibidos. Contiene una "acción" y opcionalmente "datos" adicionales.
-         */
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null) {
-                // TODO: error! manejar? Por ahora se ignora silenciosamente.
-                return;
-            }
+    private void accionServicioDispositivoApagado(int tipoRespuesta, Serializable datos) {
+        android.util.Log.d(MainActivity.class.getCanonicalName(), ServicioGeolocalizacion.SERVICIO_ACCION_DISPOSITIVO_APAGADO + ": respuesta tipo " + tipoRespuesta);
+    }
 
-            /*
-             * Se determina acción, tipo de respuesta y datos.
-             *
-             * Mientras que los datos son opcionales, tipoRespuesta puede indicar si la operación
-             * (de la respuesta recibida) fue exitosa o no. Ver: SERVICIO_RESPUESTA_*
-             *
-             * Por ejemplo, si accion es SERVICIO_ACCION_INICIAR_SESION y tipoRespuesta
-             * es igual a SERVICIO_RESPUESTA_ERROR, entonces esto indica que la última operación
-             * de inicio de sesión fracasó. Si esto ocurre, la Activity debe mostrarle al usuario
-             * que no se pudo iniciar una nueva sesión y se debe arreglar el error.
-             */
-            String accion = intent.getAction();
-            int tipoRespuesta = intent.getIntExtra(ServicioGeolocalizacion.SERVICIO_RESPUESTA_PROPIEDAD_TIPO, ServicioGeolocalizacion.SERVICIO_RESPUESTA_VACIA);
-            Serializable datos = intent.getSerializableExtra(ServicioGeolocalizacion.SERVICIO_RESPUESTA_PROPIEDAD_DATOS);
-
-            // Despachando a handler de respuesta adecuado:
-            switch (accion) {
-                case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_INICIADO:
-                    accionGPSIniciado(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_TERMINADO:
-                    accionGPSTerminado(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_DESACTIVADO:
-                    accionGPSDesactivado(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION:
-                    accionIniciarSesion(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_TERMINAR_SESION:
-                    accionTerminarSesion(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SERVICIO:
-                    accionIniciarServicio(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_TERMINAR_SERVICIO:
-                    accionTerminarServicio(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_SERVICIO_REINICIADO:
-                    accionServicioReiniciado(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_NINGUNA:
-                    accionNinguna(tipoRespuesta, datos);
-                    break;
-                case ServicioGeolocalizacion.SERVICIO_ACCION_DESCONOCIDA:
-                default:
-                    accionDesconocida(tipoRespuesta, datos);
-                    break;
-            }
-
-            // En tdo caso es importante que el usuario sepa los datos de la sesión actual (si hay)
-            actualizarVistasInformacion();
+    /**
+     * Extrae información del mensaje (intent) recibido de ServicioGeolocalizacion y toma
+     * decisiones basándose en su contenido. En especial, basñandose en su "acción."
+     *
+     * La "accion" debe coincidir con alguno de los valores de
+     * ServicioGeolocalizacion.SERVICIO_ACCION_* para que este método haga algo. Si accion
+     * coincide, entonces el flujo de ejecución es despachado por este método a un método
+     * accion*() de esta Activity que corresponda a la acción; el código de esta función
+     * accion*() debe manejar adecuadamente la respuesta recibida.
+     *
+     * Tenga en cuenta que a este receptor sólo llegarán mensajes que están definidos en la
+     * propiedad "filtroAccionesServicio."
+     *
+     * @param intent Datos recibidos. Contiene una "acción" y opcionalmente "datos" adicionales.
+     */
+    private void intentServicioGeolocalizacionRecibido(Intent intent) {
+        if (intent == null) {
+            // TODO: error! manejar? Por ahora se ignora silenciosamente.
+            return;
         }
+
+        /*
+         * Se determina acción, tipo de respuesta y datos.
+         *
+         * Mientras que los datos son opcionales, tipoRespuesta puede indicar si la operación
+         * (de la respuesta recibida) fue exitosa o no. Ver: SERVICIO_RESPUESTA_*
+         *
+         * Por ejemplo, si accion es SERVICIO_ACCION_INICIAR_SESION y tipoRespuesta
+         * es igual a SERVICIO_RESPUESTA_ERROR, entonces esto indica que la última operación
+         * de inicio de sesión fracasó. Si esto ocurre, la Activity debe mostrarle al usuario
+         * que no se pudo iniciar una nueva sesión y se debe arreglar el error.
+         */
+        String accion = intent.getAction();
+        int tipoRespuesta = intent.getIntExtra(ServicioGeolocalizacion.SERVICIO_RESPUESTA_PROPIEDAD_TIPO, ServicioGeolocalizacion.SERVICIO_RESPUESTA_VACIA);
+        Serializable datos = intent.getSerializableExtra(ServicioGeolocalizacion.SERVICIO_RESPUESTA_PROPIEDAD_DATOS);
+
+        // Despachando a handler de respuesta adecuado:
+        switch (accion) {
+            case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_INICIADO:
+                accionGPSIniciado(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_TERMINADO:
+                accionGPSTerminado(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_GPS_DESACTIVADO:
+                accionGPSDesactivado(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION:
+                accionIniciarSesion(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_TERMINAR_SESION:
+                accionTerminarSesion(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SERVICIO:
+                accionIniciarServicio(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_TERMINAR_SERVICIO:
+                accionTerminarServicio(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_SERVICIO_REINICIADO:
+                accionServicioReiniciado(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_DISPOSITIVO_APAGADO:
+                accionServicioDispositivoApagado(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_NINGUNA:
+                accionNinguna(tipoRespuesta, datos);
+                break;
+            case ServicioGeolocalizacion.SERVICIO_ACCION_DESCONOCIDA:
+            default:
+                accionDesconocida(tipoRespuesta, datos);
+                break;
+        }
+
+        // En tdo caso es importante que el usuario sepa los datos de la sesión actual (si hay)
+        actualizarVistasInformacion();
     }
 
     /**
@@ -670,6 +845,8 @@ public class MainActivity extends AppCompatActivity {
         mensajesServicio = (TextView) findViewById(R.id.mensajesServicio);
         mensajesServicio.append(String.format(formatoMensajesNotificacion, fechaLocalAhora(), getString(R.string.anuncio_binevenido)));
 
+        dialogoNombreSesion = null;
+
         botonToggleServicio = (Button) findViewById(R.id.toggleServicio);
         botonToggleServicio.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -679,7 +856,12 @@ public class MainActivity extends AppCompatActivity {
         });
 
         receptor = LocalBroadcastManager.getInstance(this);
-        receptor.registerReceiver(new ReceptorServicioGeolocalizacion(), filtroAccionesServicio);
+        receptor.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                intentServicioGeolocalizacionRecibido(intent);
+            }
+        }, filtroAccionesServicio);
 
         startService(new Intent(ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SERVICIO, null, this, ServicioGeolocalizacion.class));
     }

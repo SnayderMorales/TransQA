@@ -2,7 +2,10 @@ package xyz.fabianpineda.desarrollomovil.transqa.geolocalizacion;
 
 import android.Manifest;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -34,7 +37,8 @@ import xyz.fabianpineda.desarrollomovil.transqa.db.SesionSQLite;
  * Se trata de un servicio tipo "started service" (en contraste a un "bound service") es iniciado
  * por y recibe mensajes por medio de intents enviados por otros componentes "clientes" (ej.
  * Activities). De esta manera, el servicio persiste y opera mientras la interfáz de usuario de la
- * aplicación no es visible o no existe, sin intervención contínua de parte de/los usuario(s).
+ * aplicación no es visible o no existe, sin intervención contínua de parte de/los usuario(s). Toda
+ * sesión es terminada si es apagado el dispositivo.
  *
  * El servicio recibe instrucciones por medio de Intents enviados desde componentes "clientes."
  * Esto lo Hacen usando el método startService. Cada vez que el método es ejecutado, el servicio es
@@ -85,6 +89,20 @@ import xyz.fabianpineda.desarrollomovil.transqa.db.SesionSQLite;
  * el "Fused Location Provider" de las APIs Google Play.
  */
 public final class ServicioGeolocalizacion extends Service implements LocationListener {
+    /**
+     * Listado de tipos de acciones (Intents) aceptados por el Servicio.
+     *
+     * Actualmente sólo responde al evento de sistema ACTION_SHUTDOWN para terminar sesiones en
+     * progreso al apagar el dispositivo.
+     *
+     * TODO: mover a AndroidManifest.xml?
+     */
+    private static final IntentFilter filtroAccionesSistema;
+    static {
+        filtroAccionesSistema = new IntentFilter();
+        filtroAccionesSistema.addAction(Intent.ACTION_SHUTDOWN);
+    }
+
     // Configuración del servicio. Usar con cuidado.
     private static final int SERVICIO_MODO_INICIO = START_STICKY;                       // El servicio se reiniciará tan pronto como sea posible si es "matado" por Android.
     private static final int SERVICIO_INTERVALO_TIEMPO_GEOLOCALIZACION_MINIMO = 5000;   // Intervalo de tiempo mínimo entre capturas, en milisegundos. Es un "hint"; Android puede tardar más de 5000 ms.
@@ -99,6 +117,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     public static final String SERVICIO_ACCION_TERMINAR_SERVICIO = "SERVICIO_GEOLOCALIZACION_ACCION_TERMINAR_SERVICIO";
 
     // Acciones que nunca deben ser solicitadas por componentes clientes pero a las que pueden responder como "broadcast receivers"
+    public static final String SERVICIO_ACCION_DISPOSITIVO_APAGADO = "SERVICIO_GEOLOCALIZACION_ACCION_DISPOSITIVO_APAGADO";
     public static final String SERVICIO_ACCION_SERVICIO_REINICIADO = "SERVICIO_GEOLOCALIZACION_ACCION_SERVICIO_REINICIADO";
     public static final String SERVICIO_ACCION_GPS_TERMINADO = "SERVICIO_GEOLOCALIZACION_ACCION_GPS_TERMINADO";
     public static final String SERVICIO_ACCION_GPS_INICIADO = "SERVICIO_GEOLOCALIZACION_ACCION_GPS_INICIADO";
@@ -127,6 +146,39 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     public static final int SERVICIO_RESPUESTA_VACIA = 1;
     public static final int SERVICIO_RESPUESTA_NO_CAMBIOS = 2;
     public static final int SERVICIO_RESPUESTA_OK = 3;
+
+    /*
+     * Algunas acciones aceptan parámetros adicionales que serán recibidos en onStartCommand (a
+     * trevés de un Intent), mientras que otras opciones requieren estos datos adicionales. En
+     * la mayoría de los casos, las acciones no necesitan estos datos.
+     *
+     * Si un método accion*() acepta un Bundle (es decir, accion*(Bundle)), entonces ese método
+     * recibirá un Bundle contenido en el Intent recibido en onStartCommand, y puede o no contener
+     * la llave SERVICIO_PARAMETRO_ACCION con un valor de un tipo que varía de acción a acción. Si
+     * un método de una acción acepta datos adicionales, entonces debe comprobar la existencia de
+     * esta clave y proveer valores por defecto si no está presente. Si una acción requiere estos
+     * datos, entonces debe generar un error y ser cancelada si no está presente esta llave.
+     *
+     * Los tipos de datos son los siguientes para las acciones
+     *
+     *      * Para acciones que *requieren* datos adicionales:
+     *          * Ninguna acción *requiere* datos adicionales por el momento.
+     *      * Para acciones que *aceptan* datos adicionales:
+     *          * SERVICIO_ACCION_INICIAR_SESION: String. El nombre de la sesión que será iniciada.
+     *
+     * Todas las acciones no listadas aquí ignoran la llave SERVICIO_PARAMETRO_ACCION. También es
+     * seguro asumir que las acciones usadas internamente que no deben solicitar los clientes no
+     * usan ningún tipo de datos adicionales a manera de Bundle y su valor será a menudo null.
+     *
+     * A futuro podrían ser agregados más parámetros.
+     */
+    public static final String SERVICIO_PARAMETRO_ACCION = "SERVICIO_GEOLOCALIZACION_PARAMETRO_ACCION"; // Debe ser una String vacía o no; null es aceptable.
+
+    /*
+     * Listado de parámetros *requeridos* que son aceptados por algunas acciones.
+     * Estas propiedades pueden estar disponibles en Intents recibidos en onStartCommand.
+     */
+    // Ninguna acción *requiere* datos adicionales por el momento.
 
     /*
      * Las propiedades que contiene tdo Intent de respuesta enviado componentes clientes.
@@ -177,7 +229,12 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     public static final String SERVICIO_PREFERENCIA_NOMBRE_SESION_DEFAULT = "Sin nombre";
     public static final String SERVICIO_PREFERENCIA_FECHA_DEFAULT = "/";
 
-    // Objetos usados por el servicio.
+    /*
+     * Objetos usados por el servicio.
+     *
+     * Note que el objeto "transmisor" es usado como un receptor de mensajes del sistema para poder
+     * terminar sesiones cuando el dispositivo esté siendo apagado.
+     */
     private LocalBroadcastManager transmisor;   // Emisor de mensajes usado para informar clientes.
     private SharedPreferences preferencias;     // Preferencias compartidas a nivel de aplicación.
     private LocationManager geolocalizador;     // Usado para obtener info. de geolocalización.
@@ -264,14 +321,14 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      *
      * @return true si la operación fue exitosa. false en otros casos.
      */
-    private boolean iniciarSesion() {
+    private boolean iniciarSesion(String nombre) {
         Cursor sesion;
 
         if (sesionIDActual > 0) {
             return false; // No se puede crear una nueva sesión si ya existe una.
         }
 
-        if ((sesion = SesionSQLite.iniciarSesion(db)) != null) {
+        if ((sesion = SesionSQLite.iniciarSesion(db, nombre)) != null) {
             preferencias.edit()
                 .putLong(SERVICIO_PREFERENCIA_ID_SESION_EN_PROGRESO, sesionIDActual = sesion.getLong(Sesion.TABLA_SESION_ID_INDICE))
                 .putLong(SERVICIO_PREFERENCIA_ID_SESION_A_MOSTRAR, sesionIDAMostrar = sesionIDActual)
@@ -303,8 +360,6 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
                     .putLong(SERVICIO_PREFERENCIA_ID_SESION_EN_PROGRESO, sesionIDActual = SERVICIO_PREFERENCIA_ID_DEFAULT)
                     .putString(SERVICIO_PREFERENCIA_FECHA_FIN_SESION, sesionFechaFin = resultado.getString(Sesion.TABLA_SESION_FECHA_FIN_INDICE))
             .commit();
-
-            android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "DEBUG: " + resultado.getString(Sesion.TABLA_SESION_FECHA_FIN_INDICE));
 
             resultado.close();
             return true;
@@ -388,8 +443,16 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      *        con acción "ninguna" y la captura de coordenadas continuará indefinidamente,
      *        almacenando coordenadas en la base de datos local. Se emite un mensaje
      *        SERVICIO_ACCION_INICIAR_SESION con respuesta SERVICIO_RESPUESTA_OK.
+     *
+     *  @param datos Bundle con datos adicionales enviados desde onStartCommand. Su propiedad SERVICIO_PARAMETRO_ACCION será tratada como un String que contiene el nombre de la sesión a crear. Si no hay un nombre, el nombre será tratado como null (o una String vacía en la base de datos.)
      */
-    private void accionIniciarSesion() {
+    private void accionIniciarSesion(Bundle datos) {
+        String nombre = null;
+
+        if (datos != null) {
+            nombre = datos.getString(SERVICIO_PARAMETRO_ACCION, null);
+        }
+
         if (!iniciarGPS()) {
             preferencias.edit()
                 .putBoolean(SERVICIO_PREFERENCIA_OPERANDO, operando = false)
@@ -410,7 +473,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
 
         responder(SERVICIO_ACCION_GPS_INICIADO, SERVICIO_RESPUESTA_VACIA);
 
-        if (!iniciarSesion()) {
+        if (!iniciarSesion(nombre)) {
             terminarGPS();
             responder(SERVICIO_ACCION_GPS_TERMINADO, SERVICIO_RESPUESTA_VACIA);
 
@@ -449,8 +512,10 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      *      * Si la operación fue exitosa, se cambia el estado del servicio a "no operando" y
      *        y la acción a "ninguna". Se envía como respuesta un mensaje tipo
      *        SERVICIO_ACCION_TERMINAR_SESION con código de respuesta SERVICIO_RESPUESTA_OK.
+     *
+     *  @param datos Bundle con datos adicionales enviados desde onStartCommand. Ignorado.
      */
-    private void accionTerminarSesion() {
+    private void accionTerminarSesion(Bundle datos) {
         long sesionActual = sesionIDActual;
 
         terminarGPS();
@@ -489,8 +554,10 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      *      * Si el servicio no estaba funcionando y acaba de ser iniciado, se marca como "iniciado"
      *        y se envía una respuesta tipo SERVICIO_ACCION_INICIAR_SERVICIO con código de respuesta
      *        SERVICIO_RESPUESTA_OK.
+     *
+     *  @param datos Bundle con datos adicionales enviados desde onStartCommand. Ignorado.
      */
-    private void accionIniciarServicio() {
+    private void accionIniciarServicio(Bundle datos) {
         // Prácticamente no hace nada, ya que cualquier startService causa que el servicio inicie si no está iniciado.
         // A pesar de esto, es la manera recomendada de iniciar el servicio porque causa una respuesta a clientes.
         preferencias.edit().putString(SERVICIO_PREFERENCIA_ACCION, accion = SERVICIO_ACCION_NINGUNA).commit();
@@ -513,10 +580,87 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      * El método simplemente cambia la "accion" a realizar a SERVICIO_ACCION_TERMINAR_SERVICIO y
      * se intenta detener el servicio. Esto tiene como consecuencia que se ejecute su método
      * onDestroy(), el cual se encarga de terminar el servicio ordenadamente.
+     *
+     *  @param datos Bundle con datos adicionales enviados desde onStartCommand. Ignorado.
      */
-    private void accionTerminarServicio() {
+    private void accionTerminarServicio(Bundle datos) {
         preferencias.edit().putString(SERVICIO_PREFERENCIA_ACCION, accion = SERVICIO_ACCION_TERMINAR_SERVICIO).commit();
         stopSelf(); // onDestroy se encarga del resto. Cierra sesión si no está cerrada. Termina GPS.
+    }
+
+    /**
+     * Método ejecutado com orespuesta a solicitudes SERVICIO_ACCION_GPS_DESACTIVADO.
+     *
+     * Detiene la captura de coordenadas y termina la sesión actual, si existe. Tiene un efecto
+     * similar a SERVICIO_ACCION_TERMINAR_SERVICIO y lo usa internamente. Adicionalmente,
+     * envía un mensaje tipo SERVICIO_ACCION_GPS_DESACTIVADO con un código de respuesta
+     * tipo SERVICIO_RESPUESTA_VACIA.
+     *
+     * No se debe confundir con SERVICIO_ACCION_GPS_TERMINADO. GPS terminado símplemente ocurre
+     * cuando se deteine la captura de coordenadas, meintras que GPS desactivado ocurre cuando
+     * el usuario manualmente desactiva el GPS, el proveedor de GPS "GPS" o remueve los permisos
+     * de geolocalización a la aplicación en Android 6 o superior.
+     *
+     * No se deben hacer solicitudes de este tipo directamente por clientes y toda solicitud de
+     * clientes a esta acción debe ser ignorada por el Servicio. Los clientes son libres de
+     * responder a esta acción para mostrar mensajes relevantes a lo ocurrido.
+     *
+     *  @param datos Bundle con datos adicionales enviados desde onStartCommand. Ignorado.
+     */
+    private void accionGPSDesactivado(Bundle datos) {
+        accion = SERVICIO_ACCION_GPS_DESACTIVADO;
+        responder(SERVICIO_ACCION_GPS_DESACTIVADO, SERVICIO_RESPUESTA_VACIA);
+        accionTerminarServicio(datos);
+    }
+
+    /**
+     * Método ejecutado como respuesta a solicitudes SERVICIO_ACCION_DISPOSITIVO_APAGADO.
+     *
+     * La acción tiene el mismo efecto que ACCION_TERMINAR_SERVICIO, ya que en este caso se busca
+     * terminar el servicio (y cualquier recurso y sesión abierta) antes de apagar el sistema. Es
+     * crucial terminar toda sesión abierta al apagar el dispositivo para no afectar la información
+     * extraida del análisis de los datos; promedios de velocidad, por ejemplo. Adicionalmente,
+     * envía una respuesta tipo SERVICIO_ACCION_DISPOSITIVO_APAGADO con un código de respuesta
+     * tipo SERVICIO_RESPUESTA_VACIA.
+     *
+     * No se deben hacer solicitudes de este tipo directamente por clientes, y toda solicitud de
+     * clientes a este tipo de acción debe ser rechazada; es una acción de uso interno. Sin
+     * embargo, los clientes pueden optar por responder a respuestas de esta acción para actualizar
+     * los componentes de su UI, guardar información, o símplemente mostrar mensajes de depuración.
+     *
+     * TODO: arreglar, no funciona. Desactivado (comentado) en onCreate.
+     *
+     * @param datos Bundle con datos adicionales enviados desde onStartCommand. Ignorado.
+     */
+    private void accionDispositivoApagado(Bundle datos) {
+        accion = SERVICIO_ACCION_DISPOSITIVO_APAGADO;
+        responder(SERVICIO_ACCION_DISPOSITIVO_APAGADO, SERVICIO_RESPUESTA_VACIA);
+        accionTerminarServicio(datos);
+    }
+
+    /**
+     * Método ejecutado cuando se recibe una acción broadcast (Intent) del sistema listado en el
+     * objeto filtroAccionesSistema.
+     *
+     * Actualmente sólo responde al evento "dispositivo apagándose".
+     *
+     * TODO: arreglar, no funciona. Desactivado (comentado) en onCreate.
+     *
+     * @param intent Intent de acción en filtroAccionesSistema, enviado por Android.
+     */
+    private void intentSistemaRecibido(Intent intent) {
+        String accion;
+
+        // Se ignora tdo Intent que parezca no estar bien formado
+
+        if (intent == null || (accion = intent.getAction()) == null || accion.trim().compareTo("") == 0) {
+            return;
+        }
+
+        // Se responde por ahora sólo al evento ACTION_SHUTDOWN. Termina servicio y sesion.
+        if (accion.compareTo(Intent.ACTION_SHUTDOWN) == 0) {
+            accionTerminarServicio(null);
+        }
     }
 
     /**
@@ -563,7 +707,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
         } else if (sesionIDActual < 1) {
             // Estado inconsistente! Se está operando sobre una sesión inválida. Terminando servicio.
             responder(SERVICIO_ACCION_SERVICIO_REINICIADO, SERVICIO_RESPUESTA_ERROR, getString(R.string.error_geolocalizacion_interno));
-            accionTerminarServicio();
+            accionTerminarServicio(null);
         } else if (iniciarGPS()) {
             responder(SERVICIO_ACCION_SERVICIO_REINICIADO, SERVICIO_RESPUESTA_VACIA);
         } else {
@@ -593,6 +737,10 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      * *normalmente* a "ninguna" después de llevar a cabo cualquier operación, y su propiedad
      * iniciado es cambiada a true.
      *
+     * Algunas acciones, como accionIniciarSesion (SERVICIO_ACCION_INICIAR_SESION) pueden o
+     * requieren datos adicionales en el Intent pasado a onStartCommand para poder funcionar. En
+     * el caso de accionIniciarSesion, se puede pero no se requiere adicionar una propiedad
+     *
      * IDEA: se podría usar startID para identificar únicamente las solicitudes por Activity y
      * por petición individual. Esto permitiría hacer dos tipos de respuestas si llega a ser
      * necesario: respuestas que son atendidas para todos los "broadcast receivers", y
@@ -607,6 +755,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String accionIntent;
+        Bundle datos;
 
         if (intent == null) {
             /*
@@ -622,32 +771,36 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
                 accionIntent = SERVICIO_ACCION_DESCONOCIDA;
             }
 
+            // Algunas acciones aceptan datos; otras requieren datos. El bundle "extras" contiene estos datos.
+            datos = intent.getExtras();
+
             // Se determina un curso de acción tomando datos del Intent.
             switch (accionIntent) {
                 // ACCIONES QUE PUEDEN SER SOLICITADAS EXPLÍCITAMENTE POR CLIENTES
                 // ===============================================================
                 case SERVICIO_ACCION_INICIAR_SESION:
-                    accionIniciarSesion();
+                    accionIniciarSesion(datos);
                     break;
 
                 case SERVICIO_ACCION_TERMINAR_SESION:
-                    accionTerminarSesion();
+                    accionTerminarSesion(datos);
                     break;
 
                 case SERVICIO_ACCION_INICIAR_SERVICIO:
-                    accionIniciarServicio();
+                    accionIniciarServicio(datos);
                     break;
 
                 // ACIONES QUE NO DEBEN SER SOLICITADAS EXPLÍCITAMENTE POR CLIENTES
                 // ================================================================
                 case SERVICIO_ACCION_TERMINAR_SERVICIO:
-                    accionTerminarServicio();
+                    accionTerminarServicio(datos);
                     break;
 
                 /*
                  * El servicio ignora intencionalmente toda solicitud a las siguientes acciones,
                  * tratándolas como acción "ninguna".
                  */
+                case SERVICIO_ACCION_DISPOSITIVO_APAGADO:
                 case SERVICIO_ACCION_SERVICIO_REINICIADO:
                 case SERVICIO_ACCION_GPS_INICIADO:
                 case SERVICIO_ACCION_GPS_TERMINADO:
@@ -730,7 +883,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      */
     @Override
     public void onLocationChanged(Location location) {
-        android.util.Log.d(ServicioGeolocalizacion.class.getCanonicalName(), location.toString());
+        android.util.Log.d(ServicioGeolocalizacion.class.getCanonicalName(), location.toString()); // TODO: remover este mensaje cuando la aplicación esté más estable
 
         if (operando) {
             GeolocalizacionSQLite.agregarCoordenadas(db, sesionIDActual, location.getLatitude(), location.getLongitude());
@@ -754,22 +907,14 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      */
     @Override
     public void onStatusChanged(String provider, int status, Bundle extras) {
-        android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onStatusChanged: 1" + " " + provider);
         if (provider.compareTo(LocationManager.GPS_PROVIDER) == 0) {
-            android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onStatusChanged: 2");
             if (status == LocationProvider.OUT_OF_SERVICE) {
-                android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onStatusChanged: 3");
                 proveedorGPSActivado = false;
-
-                // No se puede continuar con permisos insuficientes.
-                accion = SERVICIO_ACCION_GPS_DESACTIVADO;
-                responder(SERVICIO_ACCION_GPS_DESACTIVADO, SERVICIO_RESPUESTA_VACIA);
-                accionTerminarServicio();
+                accionGPSDesactivado(null);
             } else if (status == LocationProvider.AVAILABLE) {
-                android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onStatusChanged: 4");
                 proveedorGPSActivado = true;
             } else if (status == LocationProvider.TEMPORARILY_UNAVAILABLE) {
-                android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onStatusChanged: 5");
+                // TODO: considerar manejar como error y considerar remover mesnsaje.
                 android.util.Log.d(xyz.fabianpineda.desarrollomovil.transqa.MainActivity.class.getCanonicalName(), "Estado de LocationProvider GPS_PROVIDER cambiado a TEMPORARILY_UNAVAILABLE.");
             }
         }
@@ -783,9 +928,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      */
     @Override
     public void onProviderEnabled(String provider) {
-        android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onProviderEnabled: 1" + " " + provider);
         if (provider.compareTo(LocationManager.GPS_PROVIDER) == 0) {
-            android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onProviderEnabled: 2");
             proveedorGPSActivado = true;
         }
     }
@@ -804,15 +947,9 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      */
     @Override
     public void onProviderDisabled(String provider) {
-        android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onProviderDisabled: 1" + " " + provider);
         if (provider.compareTo(LocationManager.GPS_PROVIDER) == 0) {
-            android.util.Log.d(ServicioGeolocalizacion.class.getSimpleName(), "onProviderDisabled: 2");
             proveedorGPSActivado = false;
-
-            // No se puede continuar con permisos insuficientes.
-            accion = SERVICIO_ACCION_GPS_DESACTIVADO;
-            responder(SERVICIO_ACCION_GPS_DESACTIVADO, SERVICIO_RESPUESTA_VACIA);
-            accionTerminarServicio();
+            accionGPSDesactivado(null);
         }
     }
 
@@ -904,6 +1041,8 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      * las operaciones no fallan con errores críticos, es seguro asumir, por ejemplo, que una
      * solicitud exitosa de "iniciar sesión" seguida por una solicitud exitosa de "terminar sesión"
      * sea atendida por el mismo proceso. El servidor continúa operando normalmente sin interrupción
+     *
+     * TODO: arreglar manejo de reinicio de dispositivo. No funciona. Desactivado (comentado).
      */
     @Override
     public void onCreate() {
@@ -919,6 +1058,13 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
         sesionFechaFin = preferencias.getString(SERVICIO_PREFERENCIA_FECHA_FIN_SESION, SERVICIO_PREFERENCIA_FECHA_DEFAULT);
 
         transmisor = LocalBroadcastManager.getInstance(this);
+        // TODO: arreglar, probar ya ctivar manejo de reinicio de dispositivo. *Debe* terminar sesiones abiertas.
+        /*transmisor.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                intentSistemaRecibido(intent);
+            }
+        }, filtroAccionesSistema);*/
 
         geolocalizador = (LocationManager) getSystemService(LOCATION_SERVICE);
 

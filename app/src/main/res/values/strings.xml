@@ -5,13 +5,23 @@
     <string name="toggle_servicio_terminar">Terminar</string>
     <string name="toggle_servicio_reiniciar">Reiniciar</string>
 
-    <string name="info_sesion_nombre_formato" formatted="false">Sesión: %s (ID: #%d)</string>
+    <string name="info_sesion_nombre_formato" formatted="false">Sesión: %s (ID: %d)</string>
     <string name="info_sesion_ninguna">Sesión: ninguna</string>
     <string name="info_sesion_estado_formato">Estado: %s</string>
     <string name="info_sesion_fecha_inicio_formato">Fecha inicio: %s</string>
     <string name="info_sesion_fecha_fin_formato">Fecha fin: %s</string>
 
-    <string name="anuncio_binevenido">Bienvenid@</string>
+    <string name="dialogo_nombre_sesion_titulo">Sesión</string>
+    <string name="dialogo_nombre_sesion_mensaje">Nombre de nueva sesión:</string>
+    <string name="dialogo_nombre_sesion_hint">@string/sesion_nombre_ninguno</string>
+    <string name="dialogo_nombre_sesion_boton_ok">Iniciar</string>
+    <string name="dialogo_nombre_sesion_boton_cancelar">Cancelar</string>
+
+    <string name="dialogo_permisos_gps_razon">Esta aplicación requiere permisos de geolocalización.</string>
+    <string name="dialogo_permisos_gps_ok">Conceder</string>
+    <string name="dialogo_permisos_gps_cancelar">Denegar</string>
+
+    <string name="anuncio_binevenido">Bienvenido</string>
     <string name="anuncio_servicio_reiniciado">Servicio reiniciado</string>
     <string name="anuncio_servicio_iniciado">Servicio iniciado</string>
     <string name="anuncio_servicio_terminado">Servicio terminado</string>
@@ -22,6 +32,8 @@
     <string name="anuncio_gps_iniciado">GPS iniciado</string>
     <string name="anuncio_gps_terminado">GPS pausado</string>
 
+    <string name="error_permisos_gps_denegados">Permisos insuficientes. Asegúrese que la aplicación cuente con permisos de localización.</string>
+    <string name="error_permisos_gps_denegados_permanentemente">Permisos insuficientes. Conceda permisos de localización a la aplicación en Ajustes para continuar.</string>
     <string name="error_geolocalizacion_interno">Error interno en servicio de geolocalización</string>
     <string name="error_geolocalizacion_no_servicio">Servicio de geolocalización no disponible</string>
     <string name="error_geolocalizacion_no_gps">El servicio de geolocalización requiere modo GPS de "alta precisión"</string>
