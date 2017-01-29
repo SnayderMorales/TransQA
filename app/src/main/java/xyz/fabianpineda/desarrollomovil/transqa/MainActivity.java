@@ -16,6 +16,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.Serializable;
 import java.text.DateFormat;
@@ -29,7 +30,7 @@ import permissions.dispatcher.OnShowRationale;
 import permissions.dispatcher.PermissionRequest;
 import permissions.dispatcher.RuntimePermissions;
 import xyz.fabianpineda.desarrollomovil.transqa.geolocalizacion.ServicioGeolocalizacion;
-import xyz.fabianpineda.desarrollomovil.transqa.widgets.DialogoEditText;
+import xyz.fabianpineda.desarrollomovil.transqa.widgets.DialogoNuevaSesion;
 
 /**
  * Define la interfáz de usuario de la aplicación. Recibe y muestra respuestas de
@@ -90,7 +91,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int BOTON_ACCION_SESION_INICIAR = 1;   // Inicia el servicio y/o una sesión.
     private static final int BOTON_ACCION_SESION_TERMINAR = 2;  // Termina el servicio y/o una sesión.
 
-    // Etiqueta que podría ser usada para identificar DialogoEditText usando un FragmentManager.
+    // Etiqueta que podría ser usada para identificar DialogoNuevaSesion usando un FragmentManager.
     private static final String DIALOGO_NOMBRE_SESION_TAG = "MAIN_ACTIVITY_DIALOGOEDITTEXT_SESION";
 
     /*
@@ -133,7 +134,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView infoFechaFinSesion;    // Muestra fecha fin de última sesión, si existe.
     private TextView mensajesServicio;      // Muestra información detallada al usuario, con fecha.
 
-    private DialogoEditText dialogoNombreSesion;    // Solicita nombre de sesión. Diálogo cancelable.
+    private DialogoNuevaSesion dialogoNombreSesion;    // Solicita nombre de sesión. Diálogo cancelable.
 
     private Button botonToggleServicio;     // Botón toggle "inteligente." Inicia/termina seesion/servicio
 
@@ -201,8 +202,8 @@ public class MainActivity extends AppCompatActivity {
         final MainActivity self = this;
 
         // Referencia final para nuevo diálogo.
-        dialogoNombreSesion = new DialogoEditText();
-        final DialogoEditText dialogo = dialogoNombreSesion;
+        dialogoNombreSesion = new DialogoNuevaSesion();
+        final DialogoNuevaSesion dialogo = dialogoNombreSesion;
 
         dialogo.mostrar(
             this,
@@ -212,40 +213,46 @@ public class MainActivity extends AppCompatActivity {
             R.string.dialogo_nombre_sesion_mensaje,
             R.string.dialogo_nombre_sesion_hint,
 
-            new DialogoEditText.ListenerDialogoEditTextOK() {
+            new DialogoNuevaSesion.ListenerDialogoNuevaSesionOK() {
                 @Override
-                public void dialogoEditTextOK(String texto) {
+                public void dialogoNuevaSesionOK(String nombreSesion, int idVehiculo) {
                     dialogoNombreSesion = null;
 
                     if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
                         notificarUsuario(R.string.anuncio_sesion_iniciando);
 
                         Intent intentIniciarSesion = new Intent(ServicioGeolocalizacion.SERVICIO_ACCION_INICIAR_SESION, null, self, ServicioGeolocalizacion.class);
-                        intentIniciarSesion.putExtra(ServicioGeolocalizacion.SERVICIO_PARAMETRO_ACCION, texto);
+                        intentIniciarSesion.putExtra(ServicioGeolocalizacion.SERVICIO_PARAMETRO_ACCION, nombreSesion);
                         self.startService(intentIniciarSesion);
                     }
+
+                    android.widget.Toast.makeText(self, String.valueOf(idVehiculo), Toast.LENGTH_SHORT).show();
                 }
             },
 
-            new DialogoEditText.ListenerDialogoEditTextCancelar() {
+            new DialogoNuevaSesion.ListenerDialogoNuevaSesionCancelar() {
                 @Override
-                public void dialogoEditTextCancelar(String texto) {
+                public void dialogoNuevaSesionCancelar(String nombreSesion, int idVehiculo) {
                     dialogoNombreSesion = null;
 
                     if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
                         botonToggleServicio.setEnabled(true);
                     }
+
+                    android.widget.Toast.makeText(self, String.valueOf(idVehiculo), Toast.LENGTH_SHORT).show();
                 }
             },
 
-            new DialogoEditText.ListenerDialogoEditTextCancelado() {
+            new DialogoNuevaSesion.ListenerDialogoNuevaSesionCancelado() {
                 @Override
-                public void dialogoEditTextCancelado(String texto) {
+                public void dialogoNuevaSesionCancelado(String nombreSesion, int idVehiculo) {
                     dialogoNombreSesion = null;
 
                     if (accion == BOTON_ACCION_SESION_INICIAR && !botonToggleServicio.isEnabled()) {
                         botonToggleServicio.setEnabled(true);
                     }
+
+                    android.widget.Toast.makeText(self, String.valueOf(idVehiculo), Toast.LENGTH_SHORT).show();
                 }
             }
         );

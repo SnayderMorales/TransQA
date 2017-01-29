@@ -10,7 +10,9 @@ import android.support.v4.app.DialogFragment;
 import android.support.v7.app.AlertDialog;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.EditText;
+import android.widget.ListView;
 import android.widget.TextView;
 
 import xyz.fabianpineda.desarrollomovil.transqa.R;
@@ -21,7 +23,7 @@ import xyz.fabianpineda.desarrollomovil.transqa.R;
  *
  * En tdo caso, como mínimo, es presentado un diálogo con un botón "OK" y un botón "cancelar", y con
  * un EditText para colectar información. Opcionalmente se puede agregar un título al diálogo,
- * un mensaje (TextView) que aparecerá arriba del EditText, y un texto "hint" para el EditText.
+ * un nombreSesion (TextView) que aparecerá arriba del EditText, y un texto "hint" para el EditText.
  *
  * Las características opcionales mencionadas anteriormente pueden ser incluidas si se usa como
  * parámetros objetos en lugar de null. Adicionalmente, el díalogo por defecto no es "cancelable",
@@ -32,17 +34,17 @@ import xyz.fabianpineda.desarrollomovil.transqa.R;
  *
  * Evite usar el método show() para mostrar el diálogo; use el método mostrar().
  */
-public class DialogoEditText extends DialogFragment {
-    public interface ListenerDialogoEditTextOK {
-        void dialogoEditTextOK(String texto);
+public class DialogoNuevaSesion extends DialogFragment {
+    public interface ListenerDialogoNuevaSesionOK {
+        void dialogoNuevaSesionOK(String nombreSesion, int idVehiculo);
     }
 
-    public interface ListenerDialogoEditTextCancelar {
-        void dialogoEditTextCancelar(String texto);
+    public interface ListenerDialogoNuevaSesionCancelar {
+        void dialogoNuevaSesionCancelar(String nombreSesion, int idVehiculo);
     }
 
-    public interface ListenerDialogoEditTextCancelado {
-        void dialogoEditTextCancelado(String texto);
+    public interface ListenerDialogoNuevaSesionCancelado {
+        void dialogoNuevaSesionCancelado(String nombreSesion, int idVehiculo);
     }
 
     private AppCompatActivity contexto;
@@ -50,17 +52,20 @@ public class DialogoEditText extends DialogFragment {
 
     private Resources recursos;
 
-
     private String titulo;
-    private String mensaje;
+    private String nombreSesion;
     private String hintTextInput;
 
-    private ListenerDialogoEditTextOK listenerOK;
-    private ListenerDialogoEditTextCancelar listenerCancelar;
-    private ListenerDialogoEditTextCancelado listenerCancelado;
+    // TODO: probando; actualmente es la posición en ListView de vehiculos, NO ES id de vehiculo.
+    private int idVehiculoSeleccionado;
 
-    private TextView viewMensaje;
-    private EditText viewContenido;
+    private ListenerDialogoNuevaSesionOK listenerOK;
+    private ListenerDialogoNuevaSesionCancelar listenerCancelar;
+    private ListenerDialogoNuevaSesionCancelado listenerCancelado;
+
+    private TextView viewTitulo;
+    private EditText viewNombreSesion;
+    private ListView viewVehiculo;
 
     /**
      * Muestra un nuevo diálogo personalizado con un EditText, un botón "OK" y un botón "cancelar"
@@ -77,15 +82,15 @@ public class DialogoEditText extends DialogFragment {
      * @param contexto Activity "padre" de este Fragment.
      * @param etiquetaFragment Etiqueta usada para identificar este DialogFragment. Un requisito del método show(); obligatorio.
      * @param titulo Título a mostrar. Opcional. No es mostrado si no está presente.
-     * @param mensaje Mensaje a mostrar encima del campo de entrada de texto. Opcional. No es mostrado si no está presente.
+     * @param nombreSesion Mensaje a mostrar encima del campo de entrada de texto. Opcional. No es mostrado si no está presente.
      * @param hintTextInput Mensaje a mostrar como "pista" cuando el campo de entrada de texto está vacío. Opcional.
      * @param listenerOK Callback que será invocado cuando se presione el boton OK. Obligatorio. El objeto que implementa este método recibirá el texto actual del campo de entrada.
      * @param listenerCancelar Callback que será invocado cuando se presione el boton Cancelar. Obligatorio. El objeto que implementa este método recibirá el texto actual del campo de entrada.
      * @param listenerCancelado Callback que será invocado cuando se cancela el diálogo presionando el botón atrás. Opcional. Si está presente, el diálogo será cancelable y si se cancela, será enviado el valor actual del campo de texto al usuario. Si no está presente, entonces el diálogo no será "cancelable" y las únicas opciones para hacerlo desaparecer son presionar el botón OK o el botón Cancelar.
      */
-    public void mostrar(AppCompatActivity contexto, String etiquetaFragment, String titulo, String mensaje, String hintTextInput, ListenerDialogoEditTextOK listenerOK, ListenerDialogoEditTextCancelar listenerCancelar, ListenerDialogoEditTextCancelado listenerCancelado) {
+    public void mostrar(AppCompatActivity contexto, String etiquetaFragment, String titulo, String nombreSesion, String hintTextInput, ListenerDialogoNuevaSesionOK listenerOK, ListenerDialogoNuevaSesionCancelar listenerCancelar, ListenerDialogoNuevaSesionCancelado listenerCancelado) {
         if (listenerOK == null || listenerCancelar == null) {
-            throw new RuntimeException("DialogoEditText.mostrar requiere un OnClickListener no nulo para el botón 'OK' y para el botón 'cancelar'.");
+            throw new RuntimeException("DialogoNuevaSesion.mostrar requiere un OnClickListener no nulo para el botón 'OK' y para el botón 'cancelar'.");
         }
 
         this.contexto = contexto;
@@ -96,7 +101,7 @@ public class DialogoEditText extends DialogFragment {
 
         this.etiquetaFragment = etiquetaFragment;
         this.titulo = titulo;
-        this.mensaje = mensaje;
+        this.nombreSesion = nombreSesion;
         this.hintTextInput = hintTextInput;
         this.listenerOK = listenerOK;
         this.listenerCancelar = listenerCancelar;
@@ -120,21 +125,21 @@ public class DialogoEditText extends DialogFragment {
      * @param contexto Activity "padre" de este Fragment.
      * @param etiquetaFragment Etiqueta usada para identificar este DialogFragment. Un requisito del método show(); obligatorio.
      * @param titulo Título a mostrar. Opcional. No es mostrado si no está presente.
-     * @param mensaje Mensaje a mostrar encima del campo de entrada de texto. Opcional. No es mostrado si no está presente.
+     * @param nombreSesion Mensaje a mostrar encima del campo de entrada de texto. Opcional. No es mostrado si no está presente.
      * @param hintTextInput Mensaje a mostrar como "pista" cuando el campo de entrada de texto está vacío. Opcional.
      * @param listenerOK Callback que será invocado cuando se presione el boton OK. Obligatorio. El objeto que implementa este método recibirá el texto actual del campo de entrada.
      * @param listenerCancelar Callback que será invocado cuando se presione el boton Cancelar. Obligatorio. El objeto que implementa este método recibirá el texto actual del campo de entrada.
      * @param listenerCancelado Callback que será invocado cuando se cancela el diálogo presionando el botón atrás. Opcional. Si está presente, el diálogo será cancelable y si se cancela, será enviado el valor actual del campo de texto al usuario. Si no está presente, entonces el diálogo no será "cancelable" y las únicas opciones para hacerlo desaparecer son presionar el botón OK o el botón Cancelar.
      */
-    public void mostrar(AppCompatActivity contexto, String etiquetaFragment, int titulo, int mensaje, int hintTextInput, ListenerDialogoEditTextOK listenerOK, ListenerDialogoEditTextCancelar listenerCancelar, ListenerDialogoEditTextCancelado listenerCancelado) {
+    public void mostrar(AppCompatActivity contexto, String etiquetaFragment, int titulo, int nombreSesion, int hintTextInput, ListenerDialogoNuevaSesionOK listenerOK, ListenerDialogoNuevaSesionCancelar listenerCancelar, ListenerDialogoNuevaSesionCancelado listenerCancelado) {
         this.recursos = contexto.getResources();
 
-        mostrar(contexto, etiquetaFragment, recursos.getString(titulo), recursos.getString(mensaje), recursos.getString(hintTextInput), listenerOK, listenerCancelar, listenerCancelado);
+        mostrar(contexto, etiquetaFragment, recursos.getString(titulo), recursos.getString(nombreSesion), recursos.getString(hintTextInput), listenerOK, listenerCancelar, listenerCancelado);
     }
 
     /**
      * Ejecutado cuando el diálogo es cancelado. No hace nada si no hay listener de cancelación. No
-     * ocurre si DialogoEditText está configurado para no ser cancelado.
+     * ocurre si DialogoNuevaSesion está configurado para no ser cancelado.
      *
      * TODO: este método, en conjunto con onCreateDialog, producen un warning que no he logrado
      * TODO: solucionar de ninguna manera. Ocurre sólo si hay un listener de evento "cancelado"
@@ -148,7 +153,7 @@ public class DialogoEditText extends DialogFragment {
         super.onCancel(dialog);
 
         if (listenerCancelado != null) {
-            listenerCancelado.dialogoEditTextCancelado(viewContenido.getText().toString().trim());
+            listenerCancelado.dialogoNuevaSesionCancelado(viewNombreSesion.getText().toString().trim(), idVehiculoSeleccionado);
         }
     }
 
@@ -161,40 +166,44 @@ public class DialogoEditText extends DialogFragment {
     @NonNull
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
+
         AlertDialog.Builder builder = new AlertDialog.Builder(contexto);
         Dialog dialogo;
 
         LayoutInflater inflater = contexto.getLayoutInflater();
-        View layout = inflater.inflate(recursos.getLayout(R.layout.dialogo_edittext), null);
+        View layout = inflater.inflate(recursos.getLayout(R.layout.dialogo_nueva_sesion), null);
         builder.setView(layout);
 
-        viewMensaje = (TextView) layout.findViewById(R.id.dialogoEditTextMensaje);
-        viewContenido = (EditText) layout.findViewById(R.id.dialogoEditTextEntrada);
+        idVehiculoSeleccionado = -1;
+
+        viewTitulo = (TextView) layout.findViewById(R.id.dialogoNuevaSesionTitulo);
+        viewNombreSesion = (EditText) layout.findViewById(R.id.dialogoNuevaSesionNombre);
+        viewVehiculo = (ListView) layout.findViewById(R.id.dialogoNuevaSesionVehiculos);
 
         // El campo de contenido siempre debe iniciar en blanco.
-        viewContenido.setText("");
+        viewNombreSesion.setText("");
 
         // No se usa un título si no lo hay.
         if (titulo != null && (titulo = titulo.trim()).compareTo("") != 0) {
             builder.setTitle(titulo);
         }
 
-        // Se muestra el View del mensaje sólo si hay un mensaje.
-        if (mensaje != null && (mensaje = mensaje.trim()).compareTo("") != 0) {
-            viewMensaje.setText(mensaje);
-            viewMensaje.setVisibility(View.VISIBLE);
+        // Se muestra el View del nombreSesion sólo si hay un nombreSesion.
+        if (nombreSesion != null && (nombreSesion = nombreSesion.trim()).compareTo("") != 0) {
+            viewTitulo.setText(nombreSesion);
+            viewTitulo.setVisibility(View.VISIBLE);
         }
 
         // Se usa un hint para el View del contenido sólo si tenemos dicho hint.
         if (hintTextInput != null && (hintTextInput = hintTextInput.trim()).compareTo("") != 0) {
-            viewContenido.setHint(hintTextInput);
+            viewNombreSesion.setHint(hintTextInput);
         }
 
         // Se asignan los listeners de botones "OK" y "Cancelar", y sus textos (en R)
         builder.setPositiveButton(R.string.dialogo_nombre_sesion_boton_ok, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                listenerOK.dialogoEditTextOK(viewContenido.getText().toString().trim());
+                listenerOK.dialogoNuevaSesionOK(viewNombreSesion.getText().toString().trim(), idVehiculoSeleccionado);
                 dismiss(); // https://developer.android.com/guide/topics/ui/dialogs.html#DismissingADialog
             }
         });
@@ -203,7 +212,7 @@ public class DialogoEditText extends DialogFragment {
         builder.setNegativeButton(R.string.dialogo_nombre_sesion_boton_cancelar, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                listenerCancelar.dialogoEditTextCancelar(viewContenido.getText().toString().trim());
+                listenerCancelar.dialogoNuevaSesionCancelar(viewNombreSesion.getText().toString().trim(), idVehiculoSeleccionado);
             }
         });
 
@@ -240,6 +249,13 @@ public class DialogoEditText extends DialogFragment {
         } else {
             dialogo.setCanceledOnTouchOutside(false);
         }
+
+        viewVehiculo.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                idVehiculoSeleccionado = position;
+            }
+        });
 
         return dialogo;
     }

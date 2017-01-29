@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="vehiculos">
+        <item name="vehiculo_bus">Bus</item>
+        <item name="vehiculo_bicicleta">Bicicleta</item>
+        <item name="vehiculo_taxi">Taxi</item>
+    </string-array>
+</resources>

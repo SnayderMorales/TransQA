@@ -89,6 +89,9 @@ import xyz.fabianpineda.desarrollomovil.transqa.db.SesionSQLite;
  * el "Fused Location Provider" de las APIs Google Play.
  */
 public final class ServicioGeolocalizacion extends Service implements LocationListener {
+    // Redefinido por compatibilidad. Ver: filtroAccionesSistema
+    private static final String INTENT_ACTION_QUICKBOOT_POWEROFF = "android.intent.action.QUICKBOOT_POWEROFF";
+
     /**
      * Listado de tipos de acciones (Intents) aceptados por el Servicio.
      *
@@ -101,6 +104,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     static {
         filtroAccionesSistema = new IntentFilter();
         filtroAccionesSistema.addAction(Intent.ACTION_SHUTDOWN);
+        filtroAccionesSistema.addAction(INTENT_ACTION_QUICKBOOT_POWEROFF);    // Disponible y necesario en vários dispositivos. No parte de API de Android. Redefinido por compatibilidad.
     }
 
     // Configuración del servicio. Usar con cuidado.
@@ -597,7 +601,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      * tipo SERVICIO_RESPUESTA_VACIA.
      *
      * No se debe confundir con SERVICIO_ACCION_GPS_TERMINADO. GPS terminado símplemente ocurre
-     * cuando se deteine la captura de coordenadas, meintras que GPS desactivado ocurre cuando
+     * cuando se detiene la captura de coordenadas, meintras que GPS desactivado ocurre cuando
      * el usuario manualmente desactiva el GPS, el proveedor de GPS "GPS" o remueve los permisos
      * de geolocalización a la aplicación en Android 6 o superior.
      *
@@ -616,12 +620,11 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
     /**
      * Método ejecutado como respuesta a solicitudes SERVICIO_ACCION_DISPOSITIVO_APAGADO.
      *
-     * La acción tiene el mismo efecto que ACCION_TERMINAR_SERVICIO, ya que en este caso se busca
-     * terminar el servicio (y cualquier recurso y sesión abierta) antes de apagar el sistema. Es
-     * crucial terminar toda sesión abierta al apagar el dispositivo para no afectar la información
-     * extraida del análisis de los datos; promedios de velocidad, por ejemplo. Adicionalmente,
-     * envía una respuesta tipo SERVICIO_ACCION_DISPOSITIVO_APAGADO con un código de respuesta
-     * tipo SERVICIO_RESPUESTA_VACIA.
+     * La acción tiene el mismo efecto que ACCION_TERMINAR_SESION, ya que en este caso se busca
+     * terminar cualquier sesión existente antes de apagar el sistema. Es crucial terminar toda
+     * sesión abierta al apagar el dispositivo para no afectar la información extraida del análisis
+     * de los datos; promedios de velocidad, por ejemplo. Adicionalmente, envía una respuesta tipo
+     * SERVICIO_ACCION_DISPOSITIVO_APAGADO con un código de respuesta tipo SERVICIO_RESPUESTA_VACIA.
      *
      * No se deben hacer solicitudes de este tipo directamente por clientes, y toda solicitud de
      * clientes a este tipo de acción debe ser rechazada; es una acción de uso interno. Sin
@@ -634,8 +637,12 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
      */
     private void accionDispositivoApagado(Bundle datos) {
         accion = SERVICIO_ACCION_DISPOSITIVO_APAGADO;
+
+        if (operando) {
+            accionTerminarSesion(null);
+        }
+
         responder(SERVICIO_ACCION_DISPOSITIVO_APAGADO, SERVICIO_RESPUESTA_VACIA);
-        accionTerminarServicio(datos);
     }
 
     /**
@@ -652,14 +659,13 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
         String accion;
 
         // Se ignora tdo Intent que parezca no estar bien formado
-
         if (intent == null || (accion = intent.getAction()) == null || accion.trim().compareTo("") == 0) {
             return;
         }
 
         // Se responde por ahora sólo al evento ACTION_SHUTDOWN. Termina servicio y sesion.
-        if (accion.compareTo(Intent.ACTION_SHUTDOWN) == 0) {
-            accionTerminarServicio(null);
+        if (accion.compareTo(Intent.ACTION_SHUTDOWN) == 0 || accion.compareTo(INTENT_ACTION_QUICKBOOT_POWEROFF) == 0) {
+            accionDispositivoApagado(null);
         }
     }
 
@@ -834,8 +840,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
             }
         }
 
-        // Control de estado y requisitos de Android.
-        iniciado = true;
+        // Requisito de Service
         return SERVICIO_MODO_INICIO;
     }
 
@@ -990,7 +995,7 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
             responder(SERVICIO_ACCION_GPS_TERMINADO, SERVICIO_RESPUESTA_VACIA);
         }
 
-        if (accion.equals(SERVICIO_ACCION_TERMINAR_SERVICIO) || accion.equals(SERVICIO_ACCION_GPS_DESACTIVADO)) {
+        if (accion.equals(SERVICIO_ACCION_TERMINAR_SERVICIO)) {
             if (sesionIDActual > 0) {
                 if (!terminarSesion()) {
                     responder(SERVICIO_ACCION_TERMINAR_SESION, SERVICIO_RESPUESTA_ERROR, String.format(
@@ -1059,12 +1064,12 @@ public final class ServicioGeolocalizacion extends Service implements LocationLi
 
         transmisor = LocalBroadcastManager.getInstance(this);
         // TODO: arreglar, probar ya ctivar manejo de reinicio de dispositivo. *Debe* terminar sesiones abiertas.
-        /*transmisor.registerReceiver(new BroadcastReceiver() {
+        transmisor.registerReceiver(new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 intentSistemaRecibido(intent);
             }
-        }, filtroAccionesSistema);*/
+        }, filtroAccionesSistema);
 
         geolocalizador = (LocationManager) getSystemService(LOCATION_SERVICE);
 
